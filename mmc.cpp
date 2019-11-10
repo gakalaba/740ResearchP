@@ -2,44 +2,9 @@
 #include <stdio.h>
 #include <map>
 
-// Associativity Parameter Values
-#define DIRECT_MAPPED 0
-#define TWO_WAY_SET_ASSOC 1  // using LRU
-#define LOAD 0
-#define STORE 1
-#define INST 2
+// A big table for memory
+map<size_t, void *> memory;
 
-// flag to check which associativity
-int assoc;
-int c;
-int s;
-int b;
-int S;
-int time_stamp;
-
-// The type used to store statistics about each pc
-typedef struct cache_element_type {
-    size_t addr;
-    size_t ins_type;
-    size_t num_references;
-    size_t num_misses;
-} cache_element_t;
-
-// The object stored in the cache simulation
-typedef struct line_type {
-    size_t tag;
-    size_t valid;
-    size_t LRU;
-    struct line_type *next;
-} line_t;
-
-// instruction cache
-line_t **iL;
-// data cache
-line_t **dL;
-// A list of all the elements in both caches
-map<size_t, cache_element_t *> data_cache_elements;
-map<size_t, cache_element_t *> ins_cache_elements;
 // Initalize all objects
 
 FILE *trace;
