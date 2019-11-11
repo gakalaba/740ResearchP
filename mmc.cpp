@@ -3,7 +3,7 @@
 #include <map>
 
 // A big table for memory
-map<size_t, void *> memory;
+map<long unsigned int *, long unsigned int> memory;
 
 // Initalize all objects
 
@@ -14,7 +14,18 @@ ADDRINT DoLoad(REG reg, ADDRINT *addr) {
             REG_StringShort(reg).c_str());
     ADDRINT value;
     PIN_SafeCopy(&value, addr, sizeof(ADDRINT));
+    //value = memory.find(addr)->second;
+
     fprintf(trace, "\nvalue = %d\n", (int)value);
+    return value;
+}
+
+ADDRINT DoStore(REG reg, ADDRINT *addr) {
+    fprintf(trace, "\nEmulate storing TO %p from %s\n", addr,
+            REG_StringShort(reg).c_str());
+    ADDRINT value;
+    PIN_SafeCopy(&value, addr, sizeof(ADDRINT));
+    memory.insert(make_pair(addr, value));
     return value;
 }
 
@@ -40,6 +51,15 @@ VOID EmulateLoad(INS ins, VOID *v) {
         INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(DoLoad), IARG_UINT32,
                        REG(INS_OperandReg(ins, 0)), IARG_MEMORYREAD_EA,
                        IARG_RETURN_REGS, INS_OperandReg(ins, 0), IARG_END);
+        // Delete the instruction
+        INS_Delete(ins);
+    }
+    if (INS_Opcode(ins) == XED_ICLASS_MOV && INS_IsMemoryWrite(ins) &&
+        INS_OperandIsReg(ins, 1) && INS_OperandIsMemory(ins, 0)) {
+        fprintf(trace, "\n%s\n", (INS_Disassemble(ins)).c_str());
+        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(DoStore), IARG_UINT32,
+                       REG(INS_OperandReg(ins, 1)), IARG_MEMORYWRITE_EA,
+                       IARG_END);
         // Delete the instruction
         INS_Delete(ins);
     }
