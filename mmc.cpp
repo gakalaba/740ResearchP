@@ -1,6 +1,8 @@
 #include "pin.H"
 #include <stdio.h>
 #include <map>
+#include <iostream>
+using namespace std;
 
 // A big table for memory
 map<long unsigned int *, long unsigned int> memory;
@@ -20,12 +22,20 @@ ADDRINT DoLoad(REG reg, ADDRINT *addr) {
     return value;
 }
 
-ADDRINT DoStore(REG reg, ADDRINT *addr) {
+ADDRINT DoStore(CONTEXT *ctxt, REG reg, ADDRINT *addr) {
+    cout << "reg value: " << PIN_GetContextReg(ctxt, reg) << "\n";
+    cout << "addr " << addr << " register " << REG_StringShort(reg).c_str() << "\n";
     fprintf(trace, "\nEmulate storing TO %p from %s\n", addr,
             REG_StringShort(reg).c_str());
-    ADDRINT value;
-    PIN_SafeCopy(&value, addr, sizeof(ADDRINT));
-    memory.insert(make_pair(addr, value));
+    //ADDRINT value;
+    UINT8 value;
+
+    //PIN_SafeCopy(&value, addr, sizeof(ADDRINT));
+    PIN_GetContextRegval(ctxt, reg, &value);
+    cout << "reg val " << value << "\n";
+    fprintf(trace, "\nvalue: %d\n", value);
+
+    //memory.insert(make_pair(addr, value));
     return value;
 }
 
@@ -44,7 +54,7 @@ VOID EmulateLoad(INS ins, VOID *v) {
     }*/
 
     // Find the instructions that move a value from memory to a register
-    if (INS_Opcode(ins) == XED_ICLASS_MOV && INS_IsMemoryRead(ins) &&
+    /*if (INS_Opcode(ins) == XED_ICLASS_MOV && INS_IsMemoryRead(ins) &&
         INS_OperandIsReg(ins, 0) && INS_OperandIsMemory(ins, 1)) {
         // op0 <- *op1
         fprintf(trace, "\n%s\n", (INS_Disassemble(ins)).c_str());
@@ -53,12 +63,14 @@ VOID EmulateLoad(INS ins, VOID *v) {
                        IARG_RETURN_REGS, INS_OperandReg(ins, 0), IARG_END);
         // Delete the instruction
         INS_Delete(ins);
-    }
+    }*/
+    // moves value from register to memory (store)
     if (INS_Opcode(ins) == XED_ICLASS_MOV && INS_IsMemoryWrite(ins) &&
         INS_OperandIsReg(ins, 1) && INS_OperandIsMemory(ins, 0)) {
         fprintf(trace, "\n%s\n", (INS_Disassemble(ins)).c_str());
-        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(DoStore), IARG_UINT32,
+        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(DoStore), IARG_CONTEXT, IARG_UINT32,
                        REG(INS_OperandReg(ins, 1)), IARG_MEMORYWRITE_EA,
+                       IARG_RETURN_REGS, INS_OperandReg(ins, 1),
                        IARG_END);
         // Delete the instruction
         INS_Delete(ins);
