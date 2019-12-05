@@ -3,6 +3,7 @@
 #include <map>
 #include <iostream>
 #include <stdbool.h>
+#include "uthash/include/uthash.h"
 using namespace std;
 
 // A big table for memory

@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdbool.h>
 #include <ctime>
+#include "uthash/include/uthash.h"
 using namespace std;
 
 #define WRITE_DELAY (5)
