@@ -204,7 +204,7 @@ VOID AfterStore(THREADID tid) {
     //return value;
 }
 
-VOID processQueue(THREADID tid) {
+VOID ProcessQueue(THREADID tid) {
     PIN_GetLock(&ins_lock, tid);
     ins_count[(tid % MAX_THREADS)]++;
     PIN_ReleaseLock(&ins_lock);
@@ -220,13 +220,28 @@ VOID processQueue(THREADID tid) {
     }
 }
 
+VOID FlushQueue(THREADID tid) {
+    queue <struct queue_elem> write_q = write_qs[(tid % MAX_THREADS)];
+    if (!write_q.empty()) {
+        struct queue_elem e = write_q.front();
+        // DO THE WRITE
+        add_store(e->addr, e->val, tid);
+        // Take it out of the queue
+        write_q.pop();
+    }
+}
+
 ////=======================================================
 //// Instrumentation routines
 ////=======================================================
 VOID EmulateLoadStore(INS ins, VOID *v) {
     if(in_main) {
+        if(INS_IsAtomicUpdate(ins)) {
+            INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(FlushQueue),
+                IARG_THREAD_ID, IARG_END);
+        }
 
-        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(processQueue),
+        INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(ProcessQueue),
                 IARG_THREAD_ID, IARG_END);
         // Find the instructions that move a value from memory to a register
         if (INS_IsMemoryRead(ins)) {
