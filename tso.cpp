@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdbool.h>
 #include <ctime>
+#include <queue>
 #include "uthash/include/uthash.h"
 using namespace std;
 
@@ -35,6 +36,7 @@ PIN_LOCK mem_lock;
 queue<struct queue_elem> write_qs[MAX_THREADS];
 struct pending_addr pending_addrs[MAX_THREADS];
 THREADID main_tid;
+bool thread_alive[MAX_THREADS];
 
 void add_store(ADDRINT *addr, ADDRINT val, THREADID tid) {
     struct mem_elem *me;
@@ -53,7 +55,7 @@ void add_store(ADDRINT *addr, ADDRINT val, THREADID tid) {
     }
 }
 
-int get_load(ADDRINT *addr, ADDRINT *value, THREADID tid) {
+int get_load(ADDRINT *addr, ADDRINT *value) {
     struct mem_elem *me;
     HASH_FIND_INT(memory, &addr, me);
     PIN_GetLock(&mem_lock, 1);
@@ -79,8 +81,8 @@ void print_mem() {
     cout << "printing map:\n";
     struct mem_elem *me;
     PIN_GetLock(&mem_lock, 1);
-    struct mem_elem *src = memory[(main_tid % MAX_THREADS)];
-    for (me = src; me != NULL; (struct mem_elem *)(me->hh.next)) {
+    struct mem_elem *src = memory;
+    for (me = src; me != NULL; me = (struct mem_elem *)(me->hh.next)) {
         cout << "addr = " << src->addr << "   value = " << src->val << "\n";
     }
     PIN_ReleaseLock(&mem_lock);
@@ -98,7 +100,7 @@ ADDRINT DoLoad1(ADDRINT *addr, UINT32 size) {
     ADDRINT value;
 
     // check if it's in our hashmap
-    if (get_load(addr, &value, tid) < 0) {
+    if (get_load(addr, &value) < 0) {
         // PIN_SafeCopy(&value, addr, sizeof(ADDRINT));
         value = get_val((*addr), size);
     } else {
@@ -114,22 +116,23 @@ VOID DoLoad2(ADDRINT *addr1, ADDRINT *addr2, UINT32 size) {
     ADDRINT value1, value2;
 
     // check if it's in our hashmap
-    if (get_load(addr1, &value1, tid) < 0) {
+    if (get_load(addr1, &value1) < 0) {
         // PIN_SafeCopy(&value1, addr1, sizeof(ADDRINT));
         value1 = get_val((*addr1), size);
     } else {
         value1 = get_val(value1, size);
     }
 
-    if (get_load(addr2, &value2, tid) < 0) {
+    if (get_load(addr2, &value2) < 0) {
         // PIN_SafeCopy(&value2, addr2, sizeof(ADDRINT));
         value2 = get_val((*addr2), size);
     } else {
         value2 = get_val(value2, size);
     }
 
-    fprintf(trace, "\nEmulate loading 2 vals: %d from addr %p  %d from addr
-            %p\n", (int)value1, addr1, (int)value2, addr2);
+    fprintf(trace,
+            "\nEmulate loading 2 vals: %d from addr %p  %d from addr %p\n",
+            (int)value1, addr1, (int)value2, addr2);
 
     // return value;
 }
@@ -162,14 +165,15 @@ VOID AfterStore(THREADID tid) {
     // Still need network delay... because all the writes will see this
     UINT64 pop_cycle = last_time + write_delay + network_delay;
 
-    struct queue_elem *e = malloc(sizeof(struct queue_elem));
+    struct queue_elem *e =
+        (struct queue_elem *)malloc(sizeof(struct queue_elem));
     e->addr = addr;
     e->val = value;
     e->cycle = pop_cycle;
 
     // don't need lock, touching your own write queue without contention
     queue<struct queue_elem> q = write_qs[(tid % MAX_THREADS)];
-    q.push(e);
+    q.push((*e));
 }
 
 VOID processQueue(THREADID tid) {
@@ -182,7 +186,7 @@ VOID processQueue(THREADID tid) {
             add_store(e.addr, e.val, tid);
             // Take it out of the queue
             write_q.pop();
-            free(e);
+            //free(&e);
         }
     }
 }
@@ -257,13 +261,13 @@ VOID ImageLoad(IMG img, VOID *) {
 VOID Fini(INT32 code, VOID *v) {
     fprintf(trace, "#eof\n");
     fclose(trace);
-    struct mem_elem *me, next_me;
+    struct mem_elem *me, *next_me;
     me = memory;
     PIN_GetLock(&mem_lock, 1);
     while (me != NULL) {
         next_me = (struct mem_elem *)(me->hh.next);
         free(me);
-        me = next_me
+        me = next_me;
     }
     PIN_ReleaseLock(&mem_lock);
 }
