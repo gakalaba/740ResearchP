@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdbool.h>
 #include <ctime>
+#include <queue>
 #include "uthash/include/uthash.h"
 using namespace std;
 
@@ -32,7 +33,7 @@ struct pending_addr {
 };
 
 // array of write queues per thread
-queue<struct queue_elem> write_qs[MAX_THREADS];
+queue <struct queue_elem> write_qs[MAX_THREADS];
 
 bool thread_alive[MAX_THREADS];
 PIN_LOCK wr_locks[MAX_THREADS];
@@ -86,7 +87,7 @@ void print_mem() {
     cout << "printing map:\n";
     struct mem_elem *me;
     struct mem_elem *src = memory[(main_tid % MAX_THREADS)];
-    for (me = src; me != NULL; (struct mem_elem *)(me->hh.next)) {
+    for (me = src; me != NULL; me = (struct mem_elem *)(me->hh.next)) {
         cout << "addr = " << src->addr << "   value = " << src->val << "\n";
     }
     cout << "\n";
@@ -100,9 +101,8 @@ ADDRINT get_val(ADDRINT val, UINT32 size) {
 
 void copy_memory(THREADID tid) {
     struct mem_elem *src = memory[(main_tid % MAX_THREADS)];
-    struct mem_elem *dst = memory[(tid % MAX_THREADS)];
+    memory[(tid % MAX_THREADS)] = NULL;
     struct mem_elem *me;
-    dst = NULL;
     PIN_GetLock(&main_mem_lock, 1);
     for (me = src; me != NULL; me = (struct mem_elem *)(me->hh.next)) {
         add_store(src->addr, src->val, tid);
@@ -146,14 +146,13 @@ VOID DoLoad2(ADDRINT *addr1, ADDRINT *addr2, UINT32 size, THREADID tid) {
         value2 = get_val(value2, size);
     }
 
-    fprintf(trace, "\nEmulate loading 2 vals: %d from addr %p  %d from addr
-            %p\n", (int)value1, addr1, (int)value2, addr2);
+    fprintf(trace, "\nEmulate loading 2 vals: %d from addr %p  %d from addr %p\n", (int)value1, addr1, (int)value2, addr2);
 
     // return value;
 }
 
 UINT64 get_base(int tid_index) {
-    queue<struct queue_elem> write_q = write_qs[tid_index];
+    queue <struct queue_elem> write_q = write_qs[tid_index];
     PIN_GetLock(&wr_locks[tid_index], 1);
     if (write_q.empty()) {
         PIN_ReleaseLock(&wr_locks[tid_index]);
@@ -168,13 +167,14 @@ UINT64 get_base(int tid_index) {
 
 VOID add_to_queues(ADDRINT *addr, ADDRINT value, UINT64 write_delay) {
     for (int i = 0; i < MAX_THREADS; i++) {
-        if (thread_alive(i)) {
+        if (thread_alive[i]) {
             // Queue the write
             UINT64 last_time = get_base(i);
             UINT64 network_delay = (UINT64)(rand() % MAX_NET_DELAY);
             UINT64 pop_cycle = last_time + write_delay + network_delay;
 
-            struct queue_elem *e = malloc(sizeof(struct queue_elem));
+            struct queue_elem *e = (struct queue_elem *)
+                malloc(sizeof(struct queue_elem));
             e->addr = addr;
             e->val = value;
             e->cycle = pop_cycle;
@@ -182,7 +182,7 @@ VOID add_to_queues(ADDRINT *addr, ADDRINT value, UINT64 write_delay) {
             // lock
             queue<struct queue_elem> q = write_qs[i];
             PIN_GetLock(&wr_locks[i], 1);
-            q.push(e);
+            q.push(*e);
             PIN_ReleaseLock(&wr_locks[i]);
         }
     }
@@ -203,7 +203,8 @@ VOID AfterStore(THREADID tid) {
     UINT64 last_time = get_base((tid % MAX_THREADS));
     UINT64 pop_cycle = (UINT64)(rand() % MAX_DELAY) + last_time;
 
-    struct queue_elem *e = malloc(sizeof(struct queue_elem));
+    struct queue_elem *e = (struct queue_elem *)
+        malloc(sizeof(struct queue_elem));
     e->addr = addr;
     e->val = value;
     e->cycle = pop_cycle;
@@ -211,7 +212,7 @@ VOID AfterStore(THREADID tid) {
     // lock
     queue<struct queue_elem> q = write_qs[(tid % MAX_THREADS)];
     PIN_GetLock(&wr_locks[(tid % MAX_THREADS)], 1);
-    q.push(e);
+    q.push(*e);
     PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)]);
 
     // PC - add to everyone's queue
@@ -232,7 +233,6 @@ VOID ProcessQueue(THREADID tid) {
             PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)]);
             // DO THE WRITE
             add_store(e.addr, e.val, tid);
-            free(e);
             return;
         }
     }
@@ -251,7 +251,6 @@ VOID FlushQueue(THREADID tid) {
         add_store(e.addr, e.val, tid);
         // Take it out of the queue
         write_q.pop();
-        free(e);
         return;
     }
     PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)]);
@@ -333,13 +332,13 @@ VOID ImageLoad(IMG img, VOID *) {
 VOID Fini(INT32 code, VOID *v) {
     fprintf(trace, "#eof\n");
     fclose(trace);
-    struct mem_elem *me, next_me;
+    struct mem_elem *me, *next_me;
     for (int i = 0; i < MAX_THREADS; i++) {
         me = memory[i];
         while (me != NULL) {
             next_me = (struct mem_elem *)(me->hh.next);
             free(me);
-            me = next_me
+            me = next_me;
         }
     }
 }
