@@ -67,7 +67,7 @@ void print_mem() {
     struct mem_elem *me;
     struct mem_elem *src = memory;
     PIN_GetLock(&mem_lock, 1);
-    for (me = src; me != NULL; (struct mem_elem *)(me->hh.next)) {
+    for (me = src; me != NULL; me = (struct mem_elem *)(me->hh.next)) {
         cout << "addr = " << src->addr << "   value = " << src->val << "\n";
     }
     PIN_ReleaseLock(&mem_lock, 1);
@@ -80,7 +80,7 @@ ADDRINT get_val(ADDRINT val, UINT32 size) {
     return ((~mask) & val);
 }
 
-ADDRINT DoLoad1(ADDRINT *addr, UINT32 size) {
+VOID DoLoad1(ADDRINT *addr, UINT32 size) {
 
     // print_mem();
     ADDRINT value;
@@ -95,10 +95,10 @@ ADDRINT DoLoad1(ADDRINT *addr, UINT32 size) {
 
     fprintf(trace, "\nEmulate loading %d from addr %p\n", (int)value, addr);
 
-    return value;
+    //return value;
 }
 
-ADDRINT DoLoad2(ADDRINT *addr1, ADDRINT *addr2, UINT32 size) {
+VOID DoLoad2(ADDRINT *addr1, ADDRINT *addr2, UINT32 size) {
     // print_mem();
     ADDRINT value1, value2;
 
@@ -117,10 +117,9 @@ ADDRINT DoLoad2(ADDRINT *addr1, ADDRINT *addr2, UINT32 size) {
         value2 = get_val(value2, size);
     }
 
-    fprintf(trace, "\nEmulate loading 2 vals: %d from addr %p  %d from addr
-            %p\n", (int)value1, addr1, (int)value2, addr2);
+    fprintf(trace, "\nEmulate loading 2 vals: %d from addr %p  %d from addr %p\n", (int)value1, addr1, (int)value2, addr2);
 
-    return value;
+    //return value;
 }
 
 VOID BeforeStore(ADDRINT *addr, UINT32 size, THREADID tid) {
@@ -134,7 +133,7 @@ VOID AfterStore(THREADID tid) {
 
     ADDRINT value = get_val((*addr), size);
 
-    add_store(addr, value)
+    add_store(addr, value, tid);
 }
 
 ////=======================================================
@@ -203,13 +202,13 @@ VOID ImageLoad(IMG img, VOID *) {
 VOID Fini(INT32 code, VOID *v) {
     fprintf(trace, "#eof\n");
     fclose(trace);
-    struct mem_elem *me, next_me;
+    struct mem_elem *me, *next_me;
     me = memory;
     PIN_GetLock(&mem_lock, 1);
     while (me != NULL) {
         next_me = (struct mem_elem *)(me->hh.next);
         free(me);
-        me = next_me
+        me = next_me;
     }
     PIN_ReleaseLock(&mem_lock, 1);
 }
