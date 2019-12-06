@@ -6,7 +6,9 @@
 #include "uthash/include/uthash.h"
 using namespace std;
 
-#define MAX_THREADS (1024)
+#define MAX_THREADS (4)
+#define MAX_DELAY (10)
+#define NET_DELAY (5)
 
 PIN_LOCK mem_lock;
 
@@ -20,6 +22,8 @@ struct pending_addr {
     ADDRINT *addr;
     UINT32 size;
 };
+
+UINT64 cycle_count[MAX_THREADS];
 
 // A big table for memory
 struct mem_elem *memory;
@@ -82,8 +86,10 @@ ADDRINT get_val(ADDRINT val, UINT32 size) {
     return ((~mask) & val);
 }
 
-VOID DoLoad1(ADDRINT *addr, UINT32 size) {
-    cout << "loading...\n";
+VOID DoLoad1(ADDRINT *addr, UINT32 size, THREADID tid) {
+
+    cycle_count[(tid % MAX_THREADS)] += MAX_DELAY;
+    return;
     // print_mem();
     ADDRINT value;
 
@@ -94,17 +100,19 @@ VOID DoLoad1(ADDRINT *addr, UINT32 size) {
     } else {
         value = get_val(value, size);
         cout << value << " value from map\n";
-        //PIN_SafeCopy(addr, &value, sizeof(ADDRINT));
+        // PIN_SafeCopy(addr, &value, sizeof(ADDRINT));
     }
     return;
 
     fprintf(trace, "\nEmulate loading %d from addr %p\n", (int)value, addr);
 
-    //return value;
+    // return value;
 }
 
-VOID DoLoad2(ADDRINT *addr1, ADDRINT *addr2, UINT32 size) {
+VOID DoLoad2(ADDRINT *addr1, ADDRINT *addr2, UINT32 size, THREADID tid) {
     // print_mem();
+    cycle_count[(tid % MAX_THREADS)] += MAX_DELAY;
+    return;
     ADDRINT value1, value2;
 
     // check if it's in our hashmap
@@ -120,24 +128,29 @@ VOID DoLoad2(ADDRINT *addr1, ADDRINT *addr2, UINT32 size) {
         value2 = get_val(value2, size);
     } else {
         value2 = get_val(value2, size);
-        //PIN_SafeCopy(addr2, &value2, sizeof(ADDRINT));
+        // PIN_SafeCopy(addr2, &value2, sizeof(ADDRINT));
     }
 
-    fprintf(trace, "\nEmulate loading 2 vals: %d from addr %p  %d from addr %p\n", (int)value1, addr1, (int)value2, addr2);
+    fprintf(trace,
+            "\nEmulate loading 2 vals: %d from addr %p  %d from addr %p\n",
+            (int)value1, addr1, (int)value2, addr2);
 
-    //return value;
+    // return value;
 }
 
 VOID BeforeStore(ADDRINT *addr, UINT32 size, THREADID tid) {
+    cycle_count[(tid % MAX_THREADS)] += MAX_DELAY + NET_DELAY;
+    return;
     pending_addrs[(tid % MAX_THREADS)].addr = addr;
     pending_addrs[(tid % MAX_THREADS)].size = size;
 }
 
 VOID AfterStore(THREADID tid) {
+
     ADDRINT *addr = pending_addrs[(tid % MAX_THREADS)].addr;
     UINT32 size = pending_addrs[(tid % MAX_THREADS)].size;
 
-    //ADDRINT value = get_val((*addr), size);
+    // ADDRINT value = get_val((*addr), size);
     ADDRINT value;
     PIN_SafeCopy(&value, addr, sizeof(ADDRINT));
     value = get_val(value, size);
@@ -145,19 +158,26 @@ VOID AfterStore(THREADID tid) {
     add_store(addr, value, tid);
 }
 
+VOID InstrIncr(THREADID tid) { cycle_count[(tid % MAX_THREADS)] += 1; }
+
 ////=======================================================
 //// Instrumentation routines
 ////=======================================================
 VOID EmulateLoadStore(INS ins, VOID *v) {
     RTN insRoutine = INS_Rtn(ins);
-    if(!RTN_Valid(insRoutine)) return;
+    if (!RTN_Valid(insRoutine)) return;
     SEC insSection = RTN_Sec(insRoutine);
     IMG insImage = SEC_Img(insSection);
     in_main = IMG_IsMainExecutable(insImage);
-    cout << in_main << " emulate \n";
     if (in_main) {
         if (INS_IsAtomicUpdate(ins)) {
             cout << "HALALALALALLA\n";
+        }
+
+        if (!INS_IsMemoryRead(ins) && !INS_HasMemoryRead2(ins) &&
+            !INS_IsMemoryWrite(ins)) {
+            INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(InstrIncr),
+                           IARG_THREAD_ID, IARG_END);
         }
         // Find the instructions that move a value from memory to a register
         fprintf(trace, "\n%s\n", (INS_Disassemble(ins)).c_str());
@@ -165,7 +185,8 @@ VOID EmulateLoadStore(INS ins, VOID *v) {
             // op0 <- *op1
             // fprintf(trace, "\n%s\n", (INS_Disassemble(ins)).c_str());
             INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(DoLoad1), IARG_UINT32,
-                           IARG_MEMORYREAD_EA, IARG_MEMORYREAD_SIZE, IARG_END);
+                           IARG_MEMORYREAD_EA, IARG_MEMORYREAD_SIZE,
+                           IARG_THREAD_ID, IARG_END);
             // Delete the instruction
             // INS_Delete(ins);
         }
@@ -174,7 +195,7 @@ VOID EmulateLoadStore(INS ins, VOID *v) {
             // fprintf(trace, "\n%s\n", (INS_Disassemble(ins)).c_str());
             INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(DoLoad2), IARG_UINT32,
                            IARG_MEMORYREAD_EA, IARG_MEMORYREAD2_EA,
-                           IARG_MEMORYREAD_SIZE, IARG_END);
+                           IARG_THREAD_ID, IARG_MEMORYREAD_SIZE, IARG_END);
             // Delete the instruction
             // INS_Delete(ins);
         }
@@ -184,13 +205,9 @@ VOID EmulateLoadStore(INS ins, VOID *v) {
             INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(BeforeStore),
                            IARG_UINT32, IARG_MEMORYWRITE_EA,
                            IARG_MEMORYWRITE_SIZE, IARG_THREAD_ID, IARG_END);
-            IPOINT where= IPOINT_AFTER;
-            if(!INS_HasFallThrough(ins)) {
-                where = IPOINT_TAKEN_BRANCH;
-            }
-            cout << where << " where\n";
-            INS_InsertCall(ins, where, AFUNPTR(AfterStore),
-                           IARG_THREAD_ID, IARG_END);
+
+            // INS_InsertCall(ins, IPOINT_AFTER, AFUNPTR(AfterStore),
+            //               IARG_THREAD_ID, IARG_END);
         }
     }
 }
@@ -198,16 +215,11 @@ VOID EmulateLoadStore(INS ins, VOID *v) {
 VOID Fini(INT32 code, VOID *v) {
     fprintf(trace, "#eof\n");
     fclose(trace);
-    struct mem_elem *me, *next_me;
-    me = memory;
-    PIN_GetLock(&mem_lock, 1);
-    while (me != NULL) {
-        next_me = (struct mem_elem *)(me->hh.next);
-        free(me);
-        me = next_me;
+    for (int i = 0; i < MAX_THREADS; i++) {
+        cout << "i = " << i << "cycle_count = " << cycle_count[i] << "\n";
     }
-    PIN_ReleaseLock(&mem_lock);
-}
+    return;
+    }
 
 /* =====================================================================
  */
