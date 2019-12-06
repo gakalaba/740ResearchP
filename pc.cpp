@@ -57,7 +57,7 @@ void add_store(ADDRINT *addr, ADDRINT val, THREADID tid) {
     if (me != NULL) {
         me->val = val;
         if (tid == main_tid) {
-            PIN_ReleaseLock(&main_mem_lock, 1);
+            PIN_ReleaseLock(&main_mem_lock);
         }
         free(new_me);
     } else {
@@ -65,7 +65,7 @@ void add_store(ADDRINT *addr, ADDRINT val, THREADID tid) {
         new_me->val = val;
         HASH_ADD_INT(memory[(tid % MAX_THREADS)], addr, new_me);
         if (tid == main_tid) {
-            PIN_ReleaseLock(&main_mem_lock, 1);
+            PIN_ReleaseLock(&main_mem_lock);
         }
     }
 }
@@ -107,7 +107,7 @@ void copy_memory(THREADID tid) {
     for (me = src; me != NULL; me = (struct mem_elem *)(me->hh.next)) {
         add_store(src->addr, src->val, tid);
     }
-    PIN_ReleaseLock(&main_mem_lock, 1);
+    PIN_ReleaseLock(&main_mem_lock);
 }
 
 ADDRINT DoLoad1(ADDRINT *addr, UINT32 size, THREADID tid) {
@@ -156,13 +156,13 @@ UINT64 get_base(int tid_index) {
     queue<struct queue_elem> write_q = write_qs[tid_index];
     PIN_GetLock(&wr_locks[tid_index], 1);
     if (write_q.empty()) {
-        PIN_ReleaseLock(&wr_locks[tid_index], 1);
+        PIN_ReleaseLock(&wr_locks[tid_index]);
         return ins_count[tid_index];
     }
     // must preserve write-write ordering
     struct queue_elem e = write_q.back();
     UINT64 c = e.cycle + 1;
-    PIN_ReleaseLock(&wr_locks[tid_index], 1);
+    PIN_ReleaseLock(&wr_locks[tid_index]);
     return c;
 }
 
@@ -183,7 +183,7 @@ VOID add_to_queues(ADDRINT *addr, ADDRINT value, UINT64 write_delay) {
             queue<struct queue_elem> q = write_qs[i];
             PIN_GetLock(&wr_locks[i], 1);
             q.push(e);
-            PIN_ReleaseLock(&wr_locks[i], 1);
+            PIN_ReleaseLock(&wr_locks[i]);
         }
     }
 }
@@ -212,7 +212,7 @@ VOID AfterStore(THREADID tid) {
     queue<struct queue_elem> q = write_qs[(tid % MAX_THREADS)];
     PIN_GetLock(&wr_locks[(tid % MAX_THREADS)], 1);
     q.push(e);
-    PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)], 1);
+    PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)]);
 
     // PC - add to everyone's queue
     add_to_queues(addr, value, (pop_cycle - last_time));
@@ -229,14 +229,14 @@ VOID ProcessQueue(THREADID tid) {
         if (ins_count[(tid % MAX_THREADS)] >= e.cycle) {
             // Take it out of the queue
             write_q.pop();
-            PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)], 1);
+            PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)]);
             // DO THE WRITE
             add_store(e.addr, e.val, tid);
             free(e);
             return;
         }
     }
-    PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)], 1);
+    PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)]);
 }
 
 VOID FlushQueue(THREADID tid) {
@@ -246,7 +246,7 @@ VOID FlushQueue(THREADID tid) {
         struct queue_elem e = write_q.front();
         // Take it out of the queue
         write_q.pop();
-        PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)], 1);
+        PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)]);
         // DO THE WRITE
         add_store(e.addr, e.val, tid);
         // Take it out of the queue
@@ -254,7 +254,7 @@ VOID FlushQueue(THREADID tid) {
         free(e);
         return;
     }
-    PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)], 1);
+    PIN_ReleaseLock(&wr_locks[(tid % MAX_THREADS)]);
 }
 
 ////=======================================================

@@ -33,13 +33,13 @@ void add_store(ADDRINT *addr, ADDRINT val, THREADID tid) {
     PIN_GetLock(&mem_lock, tid);
     if (me != NULL) {
         me->val = val;
-        PIN_ReleaseLock(&mem_lock, tid);
+        PIN_ReleaseLock(&mem_lock);
         free(new_me);
     } else {
         new_me->addr = addr;
         new_me->val = val;
         HASH_ADD_INT(memory, addr, me);
-        PIN_ReleaseLock(&mem_lock, tid);
+        PIN_ReleaseLock(&mem_lock);
     }
 }
 
@@ -48,11 +48,11 @@ int read_map(ADDRINT *addr, ADDRINT *value) {
     HASH_FIND_INT(memory, &addr, me);
     PIN_GetLock(&mem_lock, 1);
     if (me == NULL) {
-        PIN_ReleaseLock(&mem_lock, 1);
+        PIN_ReleaseLock(&mem_lock);
         return -1;
     }
     *value = me->val;
-    PIN_ReleaseLock(&mem_lock, 1);
+    PIN_ReleaseLock(&mem_lock);
     return 0;
 }
 
@@ -70,7 +70,7 @@ void print_mem() {
     for (me = src; me != NULL; (struct mem_elem *)(me->hh.next)) {
         cout << "addr = " << src->addr << "   value = " << src->val << "\n";
     }
-    PIN_ReleaseLock(&mem_lock, 1);
+    PIN_ReleaseLock(&mem_lock);
     cout << "\n";
     return;
 }
@@ -211,7 +211,7 @@ VOID Fini(INT32 code, VOID *v) {
         free(me);
         me = next_me
     }
-    PIN_ReleaseLock(&mem_lock, 1);
+    PIN_ReleaseLock(&mem_lock);
 }
 
 /* =====================================================================
