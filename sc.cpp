@@ -11,7 +11,7 @@ using namespace std;
 PIN_LOCK mem_lock;
 
 struct mem_elem {
-    ADDRINT *addr;  // key
+    ADDRINT *address;  // key
     ADDRINT val;
     UT_hash_handle hh;
 };
@@ -27,6 +27,7 @@ struct pending_addr pending_addrs[MAX_THREADS];
 // Initalize all objects
 
 void add_store(ADDRINT *addr, ADDRINT val, THREADID tid) {
+    cout << "storing...\n";
     struct mem_elem *me;
     struct mem_elem *new_me = (struct mem_elem *)malloc(sizeof(mem_elem));
     HASH_FIND_INT(memory, &addr, me);
@@ -36,14 +37,15 @@ void add_store(ADDRINT *addr, ADDRINT val, THREADID tid) {
         PIN_ReleaseLock(&mem_lock);
         free(new_me);
     } else {
-        new_me->addr = addr;
+        new_me->address = addr;
         new_me->val = val;
-        HASH_ADD_INT(memory, addr, me);
+        HASH_ADD_INT(memory, address, new_me);
         PIN_ReleaseLock(&mem_lock);
     }
 }
 
 int read_map(ADDRINT *addr, ADDRINT *value) {
+    cout << "tryna read this yung thug\n";
     struct mem_elem *me;
     HASH_FIND_INT(memory, &addr, me);
     PIN_GetLock(&mem_lock, 1);
@@ -68,7 +70,7 @@ void print_mem() {
     struct mem_elem *src = memory;
     PIN_GetLock(&mem_lock, 1);
     for (me = src; me != NULL; me = (struct mem_elem *)(me->hh.next)) {
-        cout << "addr = " << src->addr << "   value = " << src->val << "\n";
+        cout << "addr = " << src->address << "   value = " << src->val << "\n";
     }
     PIN_ReleaseLock(&mem_lock);
     cout << "\n";
@@ -81,17 +83,20 @@ ADDRINT get_val(ADDRINT val, UINT32 size) {
 }
 
 VOID DoLoad1(ADDRINT *addr, UINT32 size) {
-
+    cout << "loading...\n";
     // print_mem();
     ADDRINT value;
 
     // check if it's in our hashmap
     if (read_map(addr, &value) < 0) {
-        // PIN_SafeCopy(&value, addr, sizeof(ADDRINT));
-        value = get_val((*addr), size);
+        PIN_SafeCopy(&value, addr, sizeof(ADDRINT));
+        value = get_val(value, size);
     } else {
         value = get_val(value, size);
+        cout << value << " value from map\n";
+        //PIN_SafeCopy(addr, &value, sizeof(ADDRINT));
     }
+    return;
 
     fprintf(trace, "\nEmulate loading %d from addr %p\n", (int)value, addr);
 
@@ -104,17 +109,18 @@ VOID DoLoad2(ADDRINT *addr1, ADDRINT *addr2, UINT32 size) {
 
     // check if it's in our hashmap
     if (read_map(addr1, &value1) < 0) {
-        // PIN_SafeCopy(&value1, addr1, sizeof(ADDRINT));
-        value1 = get_val((*addr1), size);
+        PIN_SafeCopy(&value1, addr1, sizeof(ADDRINT));
+        value1 = get_val(value1, size);
     } else {
         value1 = get_val(value1, size);
     }
 
     if (read_map(addr2, &value2) < 0) {
-        // PIN_SafeCopy(&value2, addr2, sizeof(ADDRINT));
-        value2 = get_val((*addr2), size);
+        PIN_SafeCopy(&value2, addr2, sizeof(ADDRINT));
+        value2 = get_val(value2, size);
     } else {
         value2 = get_val(value2, size);
+        //PIN_SafeCopy(addr2, &value2, sizeof(ADDRINT));
     }
 
     fprintf(trace, "\nEmulate loading 2 vals: %d from addr %p  %d from addr %p\n", (int)value1, addr1, (int)value2, addr2);
@@ -131,8 +137,11 @@ VOID AfterStore(THREADID tid) {
     ADDRINT *addr = pending_addrs[(tid % MAX_THREADS)].addr;
     UINT32 size = pending_addrs[(tid % MAX_THREADS)].size;
 
-    ADDRINT value = get_val((*addr), size);
-
+    //ADDRINT value = get_val((*addr), size);
+    ADDRINT value;
+    PIN_SafeCopy(&value, addr, sizeof(ADDRINT));
+    value = get_val(value, size);
+    value = 12;
     add_store(addr, value, tid);
 }
 
@@ -140,8 +149,18 @@ VOID AfterStore(THREADID tid) {
 //// Instrumentation routines
 ////=======================================================
 VOID EmulateLoadStore(INS ins, VOID *v) {
+    RTN insRoutine = INS_Rtn(ins);
+    if(!RTN_Valid(insRoutine)) return;
+    SEC insSection = RTN_Sec(insRoutine);
+    IMG insImage = SEC_Img(insSection);
+    in_main = IMG_IsMainExecutable(insImage);
+    cout << in_main << " emulate \n";
     if (in_main) {
+        if (INS_IsAtomicUpdate(ins)) {
+            cout << "HALALALALALLA\n";
+        }
         // Find the instructions that move a value from memory to a register
+        fprintf(trace, "\n%s\n", (INS_Disassemble(ins)).c_str());
         if (INS_IsMemoryRead(ins)) {
             // op0 <- *op1
             // fprintf(trace, "\n%s\n", (INS_Disassemble(ins)).c_str());
@@ -165,37 +184,14 @@ VOID EmulateLoadStore(INS ins, VOID *v) {
             INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(BeforeStore),
                            IARG_UINT32, IARG_MEMORYWRITE_EA,
                            IARG_MEMORYWRITE_SIZE, IARG_THREAD_ID, IARG_END);
-
-            INS_InsertCall(ins, IPOINT_AFTER, AFUNPTR(AfterStore),
+            IPOINT where= IPOINT_AFTER;
+            if(!INS_HasFallThrough(ins)) {
+                where = IPOINT_TAKEN_BRANCH;
+            }
+            cout << where << " where\n";
+            INS_InsertCall(ins, where, AFUNPTR(AfterStore),
                            IARG_THREAD_ID, IARG_END);
         }
-    }
-}
-
-VOID BeforeMain(int size, THREADID threadid) {
-    // program shouldn't be multithreaded when we hit main
-    in_main = true;
-    cout << "in main\n";
-}
-
-VOID AfterMain(ADDRINT ret) {
-    in_main = false;
-    cout << "main done\n";
-}
-
-VOID ImageLoad(IMG img, VOID *) {
-    RTN rtn = RTN_FindByName(img, "main");
-
-    if (RTN_Valid(rtn)) {
-        RTN_Open(rtn);
-
-        RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeMain),
-                       IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID,
-                       IARG_END);
-        RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterMain),
-                       IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
-
-        RTN_Close(rtn);
     }
 }
 
@@ -237,9 +233,8 @@ int main(int argc, char *argv[]) {
     trace = fopen("pinatrace.out", "w");
 
     // Register ImageLoad to be called when each image is loaded.
-    IMG_AddInstrumentFunction(ImageLoad, 0);
 
-    // INS_AddInstrumentFunction(EmulateLoadStore, 0);
+    INS_AddInstrumentFunction(EmulateLoadStore, 0);
     PIN_AddFiniFunction(Fini, 0);
 
     // Never returns
